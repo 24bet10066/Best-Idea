@@ -95,13 +95,9 @@ public class DataSourceConfig {
                     password = parts[1];
                 }
 
-                // Add .oregon-postgres.internal suffix if host looks like a Render internal host
-                // and doesn't already have a domain suffix
-                if (!host.contains(".") && host.startsWith("dpg-")) {
-                    host = host + ".oregon-postgres.internal";
-                    log.info("Auto-appended .oregon-postgres.internal to host: {}", host);
-                }
-
+                // Use the host exactly as provided in the URL.
+                // For Render: use the External Database URL (*.render.com) from the DB dashboard.
+                // Internal hostname (*.internal) only resolves within the same Render region.
                 String jdbcUrl = String.format("jdbc:postgresql://%s:%d%s", host, port, path);
                 return new ParsedDbUrl(jdbcUrl, user, password);
 
