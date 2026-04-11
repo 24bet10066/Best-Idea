@@ -83,17 +83,16 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-  datasource:
-    # Render provides DATABASE_URL in format: postgresql://user:pass@host:5432/dbname
-    # Spring needs jdbc:postgresql:// prefix
-    url: ${DATABASE_URL}
-    username: ${DATABASE_USER}
-    password: ${DATABASE_PASSWORD}
-    driver-class-name: org.postgresql.Driver
-    hikari:
-      maximum-pool-size: 5
-      minimum-idle: 1
-      connection-timeout: 30000
+  # DataSource is configured programmatically by DataSourceConfig (prod profile only).
+  # It accepts both URL formats:
+  #   postgresql://user:pass@host:5432/dbname  (raw Render URL — auto-parsed)
+  #   jdbc:postgresql://host:5432/dbname       (JDBC URL with separate creds)
+  # Required env vars: DATABASE_URL, DATABASE_USER, DATABASE_PASSWORD
+  #
+  # Exclude Spring Boot's DataSource auto-config so DataSourceConfig is the sole owner.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
   h2:
     console:
       enabled: false
