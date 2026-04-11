@@ -1,0 +1,30 @@
+# Maven build output
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# Frontend build artifacts
+partlinq-dashboard/node_modules/
+partlinq-dashboard/dist/
+partlinq-dashboard/.parcel-cache/
+partlinq-dashboard/.pnpm-store/
+
+# Leftover files
+Best-Idea/
+partlinq-dashboard-dist/
+partlinq-dashboard-src/
+partlinq-dashboard.html
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+logs/
