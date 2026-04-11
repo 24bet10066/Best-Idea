@@ -1,0 +1,30 @@
+# Keep Docker build context small — only the Maven project files are needed
+
+# Frontend dashboard (built separately on Vercel)
+partlinq-dashboard/
+partlinq-dashboard-dist/
+partlinq-dashboard-src/
+partlinq-dashboard.html
+
+# Maven build output (rebuilt inside Docker)
+target/
+
+# IDE / editor files
+.idea/
+*.iml
+.vscode/
+
+# Git
+.git/
+.gitattributes
+.gitignore
+
+# Docs
+*.md
+DEPLOY.md
+BUSINESS-VALIDATION.md
+HELP.md
+
+# OS files
+.DS_Store
+Thumbs.db
