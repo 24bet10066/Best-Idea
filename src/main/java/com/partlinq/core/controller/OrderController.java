@@ -2,6 +2,8 @@ package com.partlinq.core.controller;
 
 import com.partlinq.core.model.dto.OrderRequest;
 import com.partlinq.core.model.dto.OrderResponse;
+import com.partlinq.core.security.ShopAccessGuard;
+import com.partlinq.core.service.idempotency.IdempotencyService;
 import com.partlinq.core.service.order.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -35,6 +37,8 @@ import java.util.UUID;
 public class OrderController {
 
     private final OrderService orderService;
+    private final IdempotencyService idempotencyService;
+    private final ShopAccessGuard shopAccessGuard;
 
     /**
      * Place a new order.
@@ -47,11 +51,25 @@ public class OrderController {
         @ApiResponse(responseCode = "400", description = "Invalid request data"),
         @ApiResponse(responseCode = "409", description = "Insufficient credit or inventory")
     })
-    public ResponseEntity<OrderResponse> placeOrder(@Valid @RequestBody OrderRequest request) {
+    public ResponseEntity<OrderResponse> placeOrder(
+            @Valid @RequestBody OrderRequest request,
+            @Parameter(description = "Optional UUID to make retries safe")
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        shopAccessGuard.assertCanAccess(request.shopId());
         log.info("Placing order: technician={}, shop={}, items={}",
                 request.technicianId(), request.shopId(), request.items().size());
-        OrderResponse response = orderService.placeOrder(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        ResponseEntity<OrderResponse> response = idempotencyService.executeOrReplay(
+            idempotencyKey,
+            "/v1/orders",
+            OrderResponse.class,
+            () -> orderService.placeOrder(request)
+        );
+        // If this was a fresh execution, flip 200 → 201 to preserve "Created" semantics.
+        // Replays keep the original stored status.
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return ResponseEntity.status(HttpStatus.CREATED).body(response.getBody());
+        }
+        return response;
     }
 
     /**
@@ -87,6 +105,7 @@ public class OrderController {
     @ApiResponse(responseCode = "200", description = "Order list")
     public ResponseEntity<List<OrderResponse>> getOrdersByShop(
             @Parameter(description = "Shop ID") @PathVariable UUID shopId) {
+        shopAccessGuard.assertCanAccess(shopId);
         return ResponseEntity.ok(orderService.getOrdersByShop(shopId));
     }
 

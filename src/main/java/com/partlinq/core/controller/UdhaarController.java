@@ -2,8 +2,11 @@ package com.partlinq.core.controller;
 
 import com.partlinq.core.model.dto.PaymentRequest;
 import com.partlinq.core.model.dto.UdhaarSummary;
+import com.partlinq.core.security.ShopAccessGuard;
+import com.partlinq.core.service.idempotency.IdempotencyService;
 import com.partlinq.core.service.udhaar.UdhaarService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +35,8 @@ import java.util.UUID;
 public class UdhaarController {
 
 	private final UdhaarService udhaarService;
+	private final IdempotencyService idempotencyService;
+	private final ShopAccessGuard shopAccessGuard;
 
 	/**
 	 * Get udhaar summary for a technician at a specific shop.
@@ -43,6 +48,7 @@ public class UdhaarController {
 		@RequestParam UUID technicianId,
 		@RequestParam UUID shopId
 	) {
+		shopAccessGuard.assertCanAccess(shopId);
 		UdhaarSummary summary = udhaarService.getUdhaarSummary(technicianId, shopId);
 		return ResponseEntity.ok(summary);
 	}
@@ -55,6 +61,7 @@ public class UdhaarController {
 	@GetMapping("/shop/{shopId}/outstanding")
 	@Operation(summary = "Get all outstanding balances for a shop — the daily udhaar board")
 	public ResponseEntity<OutstandingResponse> getOutstandingForShop(@PathVariable UUID shopId) {
+		shopAccessGuard.assertCanAccess(shopId);
 		List<UdhaarSummary> summaries = udhaarService.getOutstandingForShop(shopId);
 
 		BigDecimal totalOutstanding = summaries.stream()
@@ -77,28 +84,50 @@ public class UdhaarController {
 	/**
 	 * Record a payment from a technician.
 	 * The shop owner's primary action: "Raju just paid ₹2,000 cash."
+	 *
+	 * Send an Idempotency-Key header (UUID, generated when the form opens).
+	 * Retries with the same key return the same response — no duplicate ledger entry.
 	 */
 	@PostMapping("/payment")
 	@Operation(summary = "Record a payment from a technician")
-	public ResponseEntity<UdhaarSummary> recordPayment(@Valid @RequestBody PaymentRequest request) {
-		UdhaarSummary summary = udhaarService.recordPayment(request);
-		return ResponseEntity.ok(summary);
+	public ResponseEntity<UdhaarSummary> recordPayment(
+		@Valid @RequestBody PaymentRequest request,
+		@Parameter(description = "Optional UUID to make retries safe")
+		@RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey
+	) {
+		shopAccessGuard.assertCanAccess(request.shopId());
+		return idempotencyService.executeOrReplay(
+			idempotencyKey,
+			"/v1/udhaar/payment",
+			UdhaarSummary.class,
+			() -> udhaarService.recordPayment(request)
+		);
 	}
 
 	/**
 	 * Record a manual adjustment (discount, write-off, correction).
+	 * Idempotent via Idempotency-Key header — same reason as payment.
 	 */
 	@PostMapping("/adjustment")
 	@Operation(summary = "Record a manual adjustment to a technician's balance")
 	public ResponseEntity<AdjustmentResponse> recordAdjustment(
-		@Valid @RequestBody AdjustmentRequest request
+		@Valid @RequestBody AdjustmentRequest request,
+		@Parameter(description = "Optional UUID to make retries safe")
+		@RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey
 	) {
-		BigDecimal newBalance = udhaarService.recordAdjustment(
-			request.technicianId(), request.shopId(),
-			request.amount(), request.notes(), request.recordedBy());
-
-		return ResponseEntity.ok(new AdjustmentResponse(
-			request.technicianId(), request.shopId(), newBalance, request.notes()));
+		shopAccessGuard.assertCanAccess(request.shopId());
+		return idempotencyService.executeOrReplay(
+			idempotencyKey,
+			"/v1/udhaar/adjustment",
+			AdjustmentResponse.class,
+			() -> {
+				BigDecimal newBalance = udhaarService.recordAdjustment(
+					request.technicianId(), request.shopId(),
+					request.amount(), request.notes(), request.recordedBy());
+				return new AdjustmentResponse(
+					request.technicianId(), request.shopId(), newBalance, request.notes());
+			}
+		);
 	}
 
 	/**
@@ -111,6 +140,7 @@ public class UdhaarController {
 		@RequestParam UUID technicianId,
 		@RequestParam UUID shopId
 	) {
+		shopAccessGuard.assertCanAccess(shopId);
 		List<UdhaarSummary.LedgerEntry> history = udhaarService.getLedgerHistory(technicianId, shopId);
 		return ResponseEntity.ok(history);
 	}
@@ -125,6 +155,7 @@ public class UdhaarController {
 		@RequestParam UUID technicianId,
 		@RequestParam UUID shopId
 	) {
+		shopAccessGuard.assertCanAccess(shopId);
 		BigDecimal balance = udhaarService.getCurrentBalance(technicianId, shopId);
 		return ResponseEntity.ok(new BalanceResponse(technicianId, shopId, balance));
 	}
@@ -135,6 +166,7 @@ public class UdhaarController {
 	@GetMapping("/shop/{shopId}/overdue")
 	@Operation(summary = "Get overdue accounts — technicians who haven't paid in 15+ days")
 	public ResponseEntity<List<UdhaarSummary>> getOverdueForShop(@PathVariable UUID shopId) {
+		shopAccessGuard.assertCanAccess(shopId);
 		List<UdhaarSummary> overdue = udhaarService.getOverdueForShop(shopId);
 		return ResponseEntity.ok(overdue);
 	}

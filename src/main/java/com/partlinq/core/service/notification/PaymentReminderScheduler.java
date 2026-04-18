@@ -2,8 +2,10 @@ package com.partlinq.core.service.notification;
 
 import com.partlinq.core.model.dto.UdhaarSummary;
 import com.partlinq.core.model.entity.PartsShop;
+import com.partlinq.core.model.entity.ReminderLog;
 import com.partlinq.core.model.entity.Technician;
 import com.partlinq.core.repository.PartsShopRepository;
+import com.partlinq.core.repository.ReminderLogRepository;
 import com.partlinq.core.repository.TechnicianRepository;
 import com.partlinq.core.service.udhaar.UdhaarService;
 import lombok.RequiredArgsConstructor;
@@ -13,7 +15,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Scheduled job for payment reminders.
@@ -30,6 +35,10 @@ import java.util.List;
  *
  * Rate limit: Max 1 reminder per technician per shop per 7 days.
  * We don't spam. Spamming destroys trust — the opposite of what we want.
+ *
+ * Dedup persistence:
+ * The ReminderLog table survives restarts. A deploy mid-day does not cause
+ * a second reminder to the same person.
  */
 @Component
 @Slf4j
@@ -40,6 +49,7 @@ public class PaymentReminderScheduler {
 	private final NotificationService notificationService;
 	private final PartsShopRepository shopRepository;
 	private final TechnicianRepository technicianRepository;
+	private final ReminderLogRepository reminderLogRepository;
 
 	/** Minimum days between reminders to the same person */
 	private static final int MIN_DAYS_BETWEEN_REMINDERS = 7;
@@ -55,31 +65,37 @@ public class PaymentReminderScheduler {
 
 		List<PartsShop> shops = shopRepository.findAll();
 		int remindersQueued = 0;
+		int remindersSkipped = 0;
 
 		for (PartsShop shop : shops) {
 			List<UdhaarSummary> overdue = udhaarService.getOverdueForShop(shop.getId());
 
 			for (UdhaarSummary summary : overdue) {
-				// Only remind if they haven't been reminded recently
-				// TODO: Track last reminder date per technician-shop pair
-				// For now, the notification dedup will happen at delivery layer
-
-				if (summary.currentBalance().compareTo(BigDecimal.ZERO) > 0
-					&& summary.daysSinceLastPayment() > 15) {
-
-					Technician tech = technicianRepository.findById(summary.technicianId())
-						.orElse(null);
-
-					if (tech != null) {
-						notificationService.queuePaymentReminder(
-							tech, shop, summary.currentBalance(), summary.daysSinceLastPayment());
-						remindersQueued++;
-					}
+				if (summary.currentBalance().compareTo(BigDecimal.ZERO) <= 0
+					|| summary.daysSinceLastPayment() <= 15) {
+					continue;
 				}
+
+				if (!shouldSendReminder(summary.technicianId(), shop.getId())) {
+					remindersSkipped++;
+					continue;
+				}
+
+				Technician tech = technicianRepository.findById(summary.technicianId())
+					.orElse(null);
+
+				if (tech == null) continue;
+
+				notificationService.queuePaymentReminder(
+					tech, shop, summary.currentBalance(), summary.daysSinceLastPayment());
+
+				recordReminderSent(tech, shop, summary.currentBalance());
+				remindersQueued++;
 			}
 		}
 
-		log.info("Payment reminder check complete. {} reminders queued.", remindersQueued);
+		log.info("Payment reminder check complete. Queued: {}, skipped (cooldown): {}",
+			remindersQueued, remindersSkipped);
 	}
 
 	/**
@@ -103,11 +119,45 @@ public class PaymentReminderScheduler {
 
 				notificationService.queueWeeklyUdhaarSummary(shop, outstanding, totalOutstanding);
 
-				log.info("Weekly summary queued for shop {}: {} technicians, ₹{} outstanding",
+				log.info("Weekly summary queued for shop {}: {} technicians, \u20B9{} outstanding",
 					shop.getShopName(), outstanding.size(), totalOutstanding);
 			}
 		}
 
 		log.info("Weekly udhaar summary generation complete");
+	}
+
+	/**
+	 * Dedup check — has this (tech, shop) pair been reminded in the last 7 days?
+	 * Persisted in reminder_log table so it survives restarts.
+	 */
+	private boolean shouldSendReminder(java.util.UUID technicianId, java.util.UUID shopId) {
+		Optional<ReminderLog> existing = reminderLogRepository
+			.findByTechnicianIdAndShopId(technicianId, shopId);
+
+		if (existing.isEmpty()) return true;
+
+		long daysSince = ChronoUnit.DAYS.between(
+			existing.get().getLastRemindedAt(), LocalDateTime.now());
+
+		return daysSince >= MIN_DAYS_BETWEEN_REMINDERS;
+	}
+
+	/**
+	 * Upsert the reminder log row for this pair.
+	 */
+	private void recordReminderSent(Technician tech, PartsShop shop, BigDecimal balance) {
+		ReminderLog row = reminderLogRepository
+			.findByTechnicianIdAndShopId(tech.getId(), shop.getId())
+			.orElseGet(() -> ReminderLog.builder()
+				.technician(tech)
+				.shop(shop)
+				.remindersSent(0)
+				.build());
+
+		row.setLastRemindedAt(LocalDateTime.now());
+		row.setLastReminderBalance(balance);
+		row.setRemindersSent(row.getRemindersSent() + 1);
+		reminderLogRepository.save(row);
 	}
 }

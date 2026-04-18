@@ -7,6 +7,7 @@ import com.partlinq.core.model.entity.*;
 import com.partlinq.core.model.enums.LedgerEntryType;
 import com.partlinq.core.model.enums.TrustEventType;
 import com.partlinq.core.repository.*;
+import com.partlinq.core.service.audit.AuditService;
 import com.partlinq.core.service.credit.CreditService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +48,7 @@ public class UdhaarService {
 	private final OrderRepository orderRepository;
 	private final TrustEventRepository trustEventRepository;
 	private final CreditService creditService;
+	private final AuditService auditService;
 
 	/** Days without payment before account is flagged as overdue */
 	private static final int OVERDUE_THRESHOLD_DAYS = 30;
@@ -144,6 +146,19 @@ public class UdhaarService {
 		log.info("Payment recorded. Tech {} balance now {} at shop {}",
 			tech.getFullName(), newBalance, shop.getShopName());
 
+		auditService.record(
+			request.recordedBy() != null ? request.recordedBy() : shop.getOwnerName(),
+			AuditService.Action.PAYMENT_RECORDED,
+			AuditService.Subject.LEDGER,
+			entry.getId(),
+			shop.getId(),
+			String.format("tech=%s, amount=%s, mode=%s, balance %s -> %s, ref=%s",
+				tech.getFullName(), request.amount().toPlainString(),
+				request.paymentMode(), currentBalance.toPlainString(),
+				newBalance.toPlainString(),
+				request.referenceNumber() != null ? request.referenceNumber() : "-")
+		);
+
 		return getUdhaarSummary(request.technicianId(), request.shopId());
 	}
 
@@ -183,7 +198,20 @@ public class UdhaarService {
 			.recordedBy(recordedBy != null ? recordedBy : shop.getOwnerName())
 			.build();
 
-		ledgerRepository.save(entry);
+		PaymentLedger savedEntry = ledgerRepository.save(entry);
+
+		auditService.record(
+			recordedBy != null ? recordedBy : shop.getOwnerName(),
+			AuditService.Action.ADJUSTMENT_MADE,
+			AuditService.Subject.LEDGER,
+			savedEntry.getId(),
+			shop.getId(),
+			String.format("tech=%s, amount=%s, balance %s -> %s, reason=%s",
+				tech.getFullName(), amount.toPlainString(),
+				currentBalance.toPlainString(), newBalance.toPlainString(),
+				notes != null ? notes : "-")
+		);
+
 		return newBalance;
 	}
 
