@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import type { Technician, UdhaarSummary, Order } from '../../../types';
-import { formatINRFull, timeAgo } from '../../../hooks/useMockData';
+import { formatINRFull, timeAgo } from '../../../lib/format';
 import { RiskBadge } from './OverviewView';
 
 interface TechniciansViewProps {

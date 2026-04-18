@@ -1,5 +1,5 @@
 import type { DashboardStats } from '../../types';
-import { formatINR } from '../../hooks/useMockData';
+import { formatINR } from '../../lib/format';
 
 interface HeaderProps {
   shopName: string;

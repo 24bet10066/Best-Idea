@@ -1,6 +1,6 @@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { TickerEvent } from '../../types';
-import { formatINRFull, timeAgo } from '../../hooks/useMockData';
+import { formatINRFull, timeAgo } from '../../lib/format';
 
 interface TickerProps {
   events: TickerEvent[];

@@ -1,6 +1,6 @@
 import { Card, CardContent } from '@/components/ui/card';
 import type { DashboardStats, Order, UdhaarSummary } from '../../../types';
-import { formatINR, formatINRFull, timeAgo } from '../../../hooks/useMockData';
+import { formatINR, formatINRFull, timeAgo } from '../../../lib/format';
 
 interface OverviewProps {
   stats: DashboardStats;

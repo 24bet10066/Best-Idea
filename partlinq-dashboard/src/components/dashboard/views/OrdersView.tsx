@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { Order, OrderStatus } from '../../../types';
-import { formatINRFull, timeAgo } from '../../../hooks/useMockData';
+import { formatINRFull, timeAgo } from '../../../lib/format';
 
 interface OrdersViewProps {
   orders: Order[];
