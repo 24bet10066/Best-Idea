@@ -28,3 +28,5 @@ partlinq-dashboard.html
 # Logs
 *.log
 logs/
+_patches/
+_patches/
